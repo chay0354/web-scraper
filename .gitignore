@@ -44,7 +44,7 @@ screenshot_*.png
 output*.html
 downloads/
 *.log
-lawyer_names.txt
+# lawyer_names.txt - Keep this file in git so API can read from it
 
 # Vercel
 .vercel
