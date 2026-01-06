@@ -9,11 +9,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from server import app
 
-# For Vercel, we need to use WSGI
-def handler(request):
-    """Vercel serverless function handler"""
-    return app(request.environ, lambda status, headers: None)
-
-# Also export app directly for compatibility
-__all__ = ['app', 'handler']
+# Export Flask app directly - Vercel will handle it as WSGI
+# The app variable is what Vercel looks for
 
