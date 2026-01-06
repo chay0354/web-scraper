@@ -45,6 +45,7 @@ output*.html
 downloads/
 *.log
 # lawyer_names.txt - Keep this file in git so API can read from it
+# lawyer_names.xlsx - Keep Excel file in git too
 
 # Vercel
 .vercel

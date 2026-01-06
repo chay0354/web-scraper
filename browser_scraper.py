@@ -16,6 +16,8 @@ import time
 import os
 import re
 from datetime import datetime
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, Alignment
 
 def create_driver(download_dir=None, headless=True):
     """Create a Chrome WebDriver instance"""
@@ -731,9 +733,73 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
     
     return all_details
 
-def save_details_to_file(details_list, filename="lawyer_names.txt", append=False, page_num=None):
-    """Save extracted lawyer details to a text file in the specified format"""
+def save_details_to_excel(details_list, filename="lawyer_names.xlsx", append=False, page_num=None):
+    """Save extracted lawyer details to an Excel file"""
     try:
+        filepath = os.path.join(os.getcwd(), filename)
+        
+        # Headers in Hebrew
+        headers = ["שם", "התמחות", "טלפון", "מייל", "עיר", "דף"]
+        
+        if append and os.path.exists(filepath):
+            # Load existing workbook
+            wb = load_workbook(filepath)
+            ws = wb.active
+        else:
+            # Create new workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Lawyers"
+            
+            # Write headers
+            for col_num, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.value = header
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='center')
+        
+        # Find the next empty row
+        next_row = ws.max_row + 1 if append and os.path.exists(filepath) else 2
+        
+        # Write data
+        for details in details_list:
+            ws.cell(row=next_row, column=1, value=details.get('name', ''))
+            ws.cell(row=next_row, column=2, value=details.get('area_of_practice', ''))
+            ws.cell(row=next_row, column=3, value=details.get('phone', ''))
+            ws.cell(row=next_row, column=4, value=details.get('email', ''))
+            ws.cell(row=next_row, column=5, value=details.get('city', ''))
+            ws.cell(row=next_row, column=6, value=page_num if page_num else '')
+            next_row += 1
+        
+        # Auto-adjust column widths
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[col_letter].width = adjusted_width
+        
+        wb.save(filepath)
+        
+        action = "Appended" if append else "Saved"
+        page_info = f" (page {page_num})" if page_num else ""
+        print(f"✓ {action} {len(details_list)} lawyer details{page_info} to Excel: {filepath}")
+        return filepath
+    except Exception as e:
+        print(f"✗ Error saving details to Excel: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def save_details_to_file(details_list, filename="lawyer_names.txt", append=False, page_num=None):
+    """Save extracted lawyer details to a text file and Excel file in the specified format"""
+    try:
+        # Save to text file
         filepath = os.path.join(os.getcwd(), filename)
         mode = "a" if append else "w"
         
@@ -753,9 +819,16 @@ def save_details_to_file(details_list, filename="lawyer_names.txt", append=False
         action = "Appended" if append else "Saved"
         page_info = f" (page {page_num})" if page_num else ""
         print(f"\n✓ {action} {len(details_list)} lawyer details{page_info} to: {filepath}")
+        
+        # Also save to Excel
+        excel_filename = filename.replace(".txt", ".xlsx")
+        save_details_to_excel(details_list, excel_filename, append=append, page_num=page_num)
+        
         return filepath
     except Exception as e:
         print(f"✗ Error saving details to file: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def get_last_page_from_file(filename="lawyer_names.txt"):
