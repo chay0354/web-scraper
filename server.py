@@ -62,6 +62,11 @@ def load_details_from_file(filename="lawyer_names.txt"):
 @app.route('/api/lawyers', methods=['GET'])
 def get_all_lawyers():
     """Get all lawyer data"""
+    # On Vercel, start scraper on first API call if not running
+    import os
+    if os.getenv('VERCEL') == '1' and not scraper_running:
+        run_scraper_on_startup()
+    
     lawyers = load_details_from_file()
     return jsonify({
         "success": True,
@@ -139,7 +144,11 @@ def start_scraper():
         scraper_running = True
         try:
             url = "https://www.israelbar.biz/"
-            interactive_scraper(url, headless=True)
+            existing_count = count_lawyers_in_file("lawyer_names.txt")
+            last_page = get_last_page_from_file("lawyer_names.txt")
+            resume_from = last_page if last_page > 0 else 1
+            
+            interactive_scraper(url, headless=True, resume_from_page=resume_from, existing_count=existing_count)
         except Exception as e:
             print(f"Scraper error: {e}")
             import traceback
@@ -149,10 +158,6 @@ def start_scraper():
     
     scraper_thread = threading.Thread(target=run_scraper, daemon=True)
     scraper_thread.start()
-    
-    # Also trigger on first API call if on Vercel
-    if os.getenv('VERCEL') == '1' and not scraper_running:
-        run_scraper_on_startup()
     
     return jsonify({
         "success": True,
