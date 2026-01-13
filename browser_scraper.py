@@ -23,7 +23,8 @@ from google.oauth2.service_account import Credentials
 
 # Google Sheets configuration
 GOOGLE_SHEETS_ID = "1yTXRHCG5VdnK4q_2smRMuGazCgMSnwjbSQpRPnLzCIA"
-START_FROM_LAWYER_NUMBER = 20000  # Start from lawyer #20,000
+START_FROM_LAWYER_NUMBER = 30  # Start from lawyer #30 (for testing)
+_google_sheets_warning_shown = False  # Track if warning was already shown
 
 def create_driver(download_dir=None, headless=True):
     """Create a Chrome WebDriver instance"""
@@ -646,6 +647,49 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
     if total_pages:
         print(f"📄 Total pages available: {total_pages}")
     
+    # Optimize: Go page by page, count lawyers until we reach the target number
+    target_page = 1
+    if START_FROM_LAWYER_NUMBER > 0:
+        print(f"\n🚀 Optimizing: Finding page with lawyer #{START_FROM_LAWYER_NUMBER}...")
+        print(f"   Going through pages and counting lawyers...")
+        
+        lawyers_counted = 0
+        search_page = 1
+        
+        while lawyers_counted < START_FROM_LAWYER_NUMBER:
+            # Extract lawyer cards from current page
+            lawyer_cards = extract_lawyer_cards(driver)
+            lawyers_on_page = len(lawyer_cards) if lawyer_cards else 0
+            
+            print(f"   Page {search_page}: {lawyers_on_page} lawyers (total counted: {lawyers_counted + lawyers_on_page})")
+            
+            # Check if target lawyer is on this page
+            if lawyers_counted + lawyers_on_page >= START_FROM_LAWYER_NUMBER:
+                # Target lawyer is on this page!
+                target_page = search_page
+                lawyers_to_skip_on_page = START_FROM_LAWYER_NUMBER - lawyers_counted - 1
+                total_processed = lawyers_counted
+                print(f"   ✓ Found! Lawyer #{START_FROM_LAWYER_NUMBER} is on page {target_page}")
+                print(f"   Will skip first {lawyers_to_skip_on_page} lawyers on this page")
+                break
+            
+            # Not on this page, move to next
+            lawyers_counted += lawyers_on_page
+            search_page += 1
+            
+            # Navigate to next page
+            if not navigate_to_next_page(driver):
+                print(f"   ⚠ Reached last page at {lawyers_counted} lawyers")
+                print(f"   Starting from lawyer #{lawyers_counted + 1} instead")
+                target_page = search_page - 1
+                total_processed = lawyers_counted
+                break
+            
+            original_url = driver.current_url
+            time.sleep(2)
+        
+        current_page = target_page
+    
     while True:
         print(f"\n{'='*60}")
         print(f"📄 Page {current_page}")
@@ -658,9 +702,9 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
         for i, card in enumerate(lawyer_cards, 1):
             total_processed += 1
             
-            # Skip until we reach lawyer #20,000
+            # Skip until we reach target lawyer number
             if total_processed < START_FROM_LAWYER_NUMBER:
-                if total_processed % 100 == 0:
+                if total_processed % 100 == 0 or (START_FROM_LAWYER_NUMBER > 0 and current_page == target_page and total_processed < START_FROM_LAWYER_NUMBER):
                     print(f"   ⏭️  Skipping lawyer #{total_processed} (need to reach #{START_FROM_LAWYER_NUMBER})")
                 continue
             
@@ -803,14 +847,17 @@ def save_details_to_excel(details_list, filename="lawyer_names.xlsx", append=Fal
 
 def save_details_to_google_sheets(details_list, sheet_id=GOOGLE_SHEETS_ID):
     """Save extracted lawyer details to Google Sheets"""
+    global _google_sheets_warning_shown
     try:
         # Try to authenticate with Google Sheets
         # First, try to use service account credentials from a JSON file
         creds_file = os.path.join(os.getcwd(), "credentials.json")
         
         if not os.path.exists(creds_file):
-            print("⚠ Google Sheets credentials.json not found. Skipping Google Sheets update.")
-            print("   To enable Google Sheets, create a service account and save credentials.json")
+            if not _google_sheets_warning_shown:
+                print("⚠ Google Sheets credentials.json not found. Skipping Google Sheets update.")
+                print("   To enable Google Sheets, create a service account and save credentials.json")
+                _google_sheets_warning_shown = True
             return False
         
         # Authenticate

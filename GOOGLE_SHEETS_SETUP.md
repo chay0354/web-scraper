@@ -1,5 +1,11 @@
 # Google Sheets Setup Instructions
 
+**Important:** Even if your Google Sheet is public, the Google Sheets API requires authentication to write data. You need to set up a service account.
+
+**Alternative:** If you don't want to set up Google Sheets, the scraper will still work perfectly and save all data to:
+- `lawyer_names.txt` (local text file)
+- `lawyer_names.xlsx` (local Excel file)
+
 To enable Google Sheets integration, you need to set up Google Cloud credentials:
 
 ## Steps:
