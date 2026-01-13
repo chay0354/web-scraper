@@ -144,11 +144,8 @@ def start_scraper():
         scraper_running = True
         try:
             url = "https://www.israelbar.biz/"
-            existing_count = count_lawyers_in_file("lawyer_names.txt")
-            last_page = get_last_page_from_file("lawyer_names.txt")
-            resume_from = last_page if last_page > 0 else 1
-            
-            interactive_scraper(url, headless=True, resume_from_page=resume_from, existing_count=existing_count)
+            # Starting from lawyer #20,000 (handled in browser_scraper.py)
+            interactive_scraper(url, headless=True)
         except Exception as e:
             print(f"Scraper error: {e}")
             import traceback
@@ -189,6 +186,13 @@ def run_scraper_on_startup():
 # The scraper will run in background when deployed
 
 if __name__ == '__main__':
+    # Fix encoding for Windows console
+    import sys
+    import io
+    if sys.stdout.encoding != 'utf-8':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    
     print("="*60)
     print("🚀 Starting Lawyer Data Server")
     print("="*60)

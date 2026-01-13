@@ -18,6 +18,12 @@ import re
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment
+import gspread
+from google.oauth2.service_account import Credentials
+
+# Google Sheets configuration
+GOOGLE_SHEETS_ID = "1yTXRHCG5VdnK4q_2smRMuGazCgMSnwjbSQpRPnLzCIA"
+START_FROM_LAWYER_NUMBER = 20000  # Start from lawyer #20,000
 
 def create_driver(download_dir=None, headless=True):
     """Create a Chrome WebDriver instance"""
@@ -608,8 +614,8 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
     print("📚 Starting to extract lawyer details from all pages...")
     print("="*60)
     
-    if resume_from_page > 1:
-        print(f"🔄 Resuming from page {resume_from_page} (already have {existing_count} lawyers)")
+    # Start from lawyer #20,000
+    print(f"🎯 Starting from lawyer #{START_FROM_LAWYER_NUMBER}")
     
     if max_names:
         remaining = max_names - existing_count
@@ -622,8 +628,9 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
         print(f"📄 Maximum pages: {max_pages}")
     
     all_details = []
-    current_page = resume_from_page
+    current_page = 1
     original_url = driver.current_url
+    total_processed = 0  # Track total lawyers processed (including skipped ones)
     
     # Load existing names to avoid duplicates
     existing_names = set()
@@ -633,16 +640,6 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
         print(f"📋 Loaded {len(existing_names)} existing names to avoid duplicates")
     except:
         pass
-    
-    # If resuming, navigate to the correct page first
-    if resume_from_page > 1:
-        print(f"\n➡️  Navigating to page {resume_from_page}...")
-        for page in range(2, resume_from_page + 1):
-            if not navigate_to_next_page(driver):
-                print(f"⚠ Could not navigate to page {page}")
-                break
-            original_url = driver.current_url
-            time.sleep(2)
     
     # Get total pages if possible
     total_pages = get_total_pages(driver)
@@ -659,12 +656,20 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
         
         # Process each lawyer card
         for i, card in enumerate(lawyer_cards, 1):
+            total_processed += 1
+            
+            # Skip until we reach lawyer #20,000
+            if total_processed < START_FROM_LAWYER_NUMBER:
+                if total_processed % 100 == 0:
+                    print(f"   ⏭️  Skipping lawyer #{total_processed} (need to reach #{START_FROM_LAWYER_NUMBER})")
+                continue
+            
             # Check if we've reached the limit
             if max_names and len(all_details) >= max_names:
                 print(f"\n✓ Reached target of {max_names} lawyers")
                 break
             
-            print(f"\n   [{len(all_details) + 1}/{max_names if max_names else '?'}] Processing: {card['name']}")
+            print(f"\n   [{len(all_details) + 1}/{max_names if max_names else '?'}] Processing lawyer #{total_processed}: {card['name']}")
             
             # If we have a detail link, visit it
             if card['detail_link']:
@@ -693,9 +698,9 @@ def extract_all_lawyer_details(driver, max_names=None, max_pages=None, resume_fr
                 all_details.append(details)
                 print(f"   ⚠ No detail link found, saved name only")
             
-            # Save to file every 10 names (for both cases)
+            # Save to file and Google Sheets every 10 names (for both cases)
             if len(all_details) % 10 == 0:
-                print(f"\n💾 Saving batch of 10 lawyers to file...")
+                print(f"\n💾 Saving batch of 10 lawyers to file and Google Sheets...")
                 filepath = os.path.join(os.getcwd(), "lawyer_names.txt")
                 is_first_batch = not os.path.exists(filepath) or os.path.getsize(filepath) == 0
                 save_details_to_file(all_details[-10:], append=not is_first_batch, page_num=current_page)
@@ -796,6 +801,66 @@ def save_details_to_excel(details_list, filename="lawyer_names.xlsx", append=Fal
         traceback.print_exc()
         return None
 
+def save_details_to_google_sheets(details_list, sheet_id=GOOGLE_SHEETS_ID):
+    """Save extracted lawyer details to Google Sheets"""
+    try:
+        # Try to authenticate with Google Sheets
+        # First, try to use service account credentials from a JSON file
+        creds_file = os.path.join(os.getcwd(), "credentials.json")
+        
+        if not os.path.exists(creds_file):
+            print("⚠ Google Sheets credentials.json not found. Skipping Google Sheets update.")
+            print("   To enable Google Sheets, create a service account and save credentials.json")
+            return False
+        
+        # Authenticate
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        creds = Credentials.from_service_account_file(creds_file, scopes=scope)
+        client = gspread.authorize(creds)
+        
+        # Open the spreadsheet
+        sheet = client.open_by_key(sheet_id)
+        worksheet = sheet.sheet1
+        
+        # Get existing data to find next row
+        try:
+            existing_data = worksheet.get_all_values()
+            next_row = len(existing_data) + 1
+        except:
+            next_row = 1
+        
+        # If first time, add headers
+        if next_row == 1:
+            headers = [["שם", "התמחות", "טלפון", "מייל", "עיר"]]
+            worksheet.append_rows(headers)
+            next_row = 2
+        
+        # Prepare data rows
+        rows_to_add = []
+        for details in details_list:
+            row = [
+                details.get('name', ''),
+                details.get('area_of_practice', ''),
+                details.get('phone', ''),
+                details.get('email', ''),
+                details.get('city', '')
+            ]
+            rows_to_add.append(row)
+        
+        # Append rows to Google Sheets
+        if rows_to_add:
+            worksheet.append_rows(rows_to_add)
+            print(f"✓ Saved {len(rows_to_add)} lawyers to Google Sheets")
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"⚠ Error saving to Google Sheets: {e}")
+        print("   Continuing with local file save...")
+        return False
+
 def save_details_to_file(details_list, filename="lawyer_names.txt", append=False, page_num=None):
     """Save extracted lawyer details to a text file and Excel file in the specified format"""
     try:
@@ -823,6 +888,9 @@ def save_details_to_file(details_list, filename="lawyer_names.txt", append=False
         # Also save to Excel
         excel_filename = filename.replace(".txt", ".xlsx")
         save_details_to_excel(details_list, excel_filename, append=append, page_num=page_num)
+        
+        # Also save to Google Sheets
+        save_details_to_google_sheets(details_list)
         
         return filepath
     except Exception as e:
@@ -1173,18 +1241,12 @@ def interactive_scraper(url, headless=True):
                 time.sleep(3)
                 
                 # Extract all lawyer details (visiting each detail page)
-                # Check if we need to resume
-                existing_count = count_lawyers_in_file("lawyer_names.txt")
-                last_page = get_last_page_from_file("lawyer_names.txt")
-                resume_from = last_page if last_page > 0 else 1
-                
-                if existing_count > 0:
-                    print(f"\n📊 Found {existing_count} existing lawyers in file (last page: {last_page})")
-                    print(f"🔄 Will resume from page {resume_from}")
+                # Starting from lawyer #20,000
+                print(f"\n📊 Starting from lawyer #{START_FROM_LAWYER_NUMBER}")
                 
                 # Note: Details are saved every 10 names automatically
                 # No limit - will scrape all available lawyers
-                all_details = extract_all_lawyer_details(driver, max_names=None, resume_from_page=resume_from, existing_count=existing_count)
+                all_details = extract_all_lawyer_details(driver, max_names=None, resume_from_page=1, existing_count=0)
                 
                 # Final verification
                 if all_details:
